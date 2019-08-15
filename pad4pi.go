@@ -1,7 +1,6 @@
 package pad4pi
 
 import (
-	"log"
 	"os"
 	"os/signal"
 	"reflect"
@@ -11,6 +10,7 @@ import (
 )
 
 const (
+	// J8p27 export of j8 board raspberry
 	J8p27 = iota
 	J8p28
 	J8p3
@@ -41,6 +41,7 @@ const (
 	J8p13
 )
 
+// GetPin easy way to mapping pin position to actual pin
 func GetPin(pin int) uint8 {
 	pinAlias := []int{
 		0,
@@ -88,20 +89,23 @@ func GetPin(pin int) uint8 {
 	return uint8(pinAlias[pin])
 }
 
+// Keypad object
 type Keypad struct {
 	RowPins           []*gpio.Pin
 	ColPins           []*gpio.Pin
 	MyKeypad          [][]string
 	ticker            *time.Ticker
 	lastInterruptTime int64
+	handlers          []func(string)
 }
+
+type handler func(string)
 
 var defaultKeypad *Keypad
 
 func getField(pin *gpio.Pin, field string) int {
 	r := reflect.ValueOf(pin)
 	f := reflect.Indirect(r).FieldByName(field)
-	// return f.Interface().(uint8)
 	return int(f.Uint())
 }
 
@@ -135,8 +139,6 @@ func getMilis() int64 {
 	unixNano := now.UnixNano()
 	umillisec := unixNano / 1000000
 
-	// log.Println(unixNano)
-	// log.Println(umillisec)
 	return umillisec
 }
 
@@ -145,7 +147,10 @@ func onKeyResponse(pin *gpio.Pin) {
 	if interruptTime-defaultKeypad.lastInterruptTime < 200 {
 		return
 	}
-	log.Println(getKey(pin))
+	for _, s := range defaultKeypad.handlers {
+		str := getKey(pin)
+		s(str)
+	}
 	defaultKeypad.lastInterruptTime = interruptTime
 
 }
@@ -159,16 +164,28 @@ func initRow(RowPins []*gpio.Pin) {
 		}
 
 	}
-	log.Println("suukses")
 }
 
-func (keypad *Keypad) Stop() {
+//RegisterKeyPressHandler add some functionality to execute
+func (keypad *Keypad) RegisterKeyPressHandler(handler handler) {
+	keypad.handlers = append(keypad.handlers, handler)
+}
+
+// ClearKeyPressHandlers clear handlers
+func (keypad *Keypad) ClearKeyPressHandlers() {
+	keypad.handlers = []func(string){}
+}
+
+//Close unexported gpio
+func (keypad *Keypad) Close() {
 	gpio.Close()
 
 	for _, p := range keypad.RowPins {
 		p.Unwatch()
 	}
 }
+
+// NewKeypad initialize keypad and run watch on background
 func NewKeypad(rowPinsInt []int, ColPinsInt []int, MyKeypad [][]string) *Keypad {
 	err := gpio.Open()
 	if err != nil {
@@ -193,7 +210,6 @@ func NewKeypad(rowPinsInt []int, ColPinsInt []int, MyKeypad [][]string) *Keypad 
 	c := make(chan os.Signal)
 	signal.Notify(c, os.Interrupt)
 
-	// defer func() {
 	defaultKeypad = &Keypad{
 		RowPins:           RowPins,
 		ColPins:           ColPins,
@@ -202,6 +218,5 @@ func NewKeypad(rowPinsInt []int, ColPinsInt []int, MyKeypad [][]string) *Keypad 
 	}
 	go initRow(RowPins)
 	return defaultKeypad
-	// }()
 
 }
